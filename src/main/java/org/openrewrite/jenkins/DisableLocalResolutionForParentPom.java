@@ -20,10 +20,16 @@ import lombok.Value;
 import org.openrewrite.ExecutionContext;
 import org.openrewrite.Recipe;
 import org.openrewrite.TreeVisitor;
+import org.openrewrite.maven.MavenIsoVisitor;
 import org.openrewrite.maven.MavenVisitor;
 import org.openrewrite.xml.AddOrUpdateChild;
+import org.openrewrite.xml.tree.Content;
 import org.openrewrite.xml.tree.Xml;
 import org.openrewrite.xml.tree.Xml.Tag;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 
 /**
  * Disables local file resolution for parent POM, as recommended by the
@@ -45,12 +51,25 @@ public class DisableLocalResolutionForParentPom extends Recipe {
 
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new MavenVisitor<ExecutionContext>() {
+        return new MavenIsoVisitor<ExecutionContext>() {
             @Override
-            public Xml visitTag(Tag tag, ExecutionContext ctx) {
+            public Xml.Tag visitTag(Xml.Tag tag, ExecutionContext ctx) {
                 if (isParentTag()) {
                     Tag relativePathTag = Tag.build("<relativePath/>");
-                    return AddOrUpdateChild.addOrUpdateChild(tag, relativePathTag, getCursor().getParentOrThrow());
+                    List<Content> contents = new ArrayList<>(tag.getContent());
+                    // Skip if relativePath is already present
+                    if (contents.stream().anyMatch(content -> content instanceof Tag && ((Xml.Tag)content).getName().equals("relativePath"))) {
+                        return tag;
+                    }
+                    Optional<Tag> maybeChild = tag.getChild("artifactId");
+                    if (!maybeChild.isPresent()) {
+                        return tag;
+
+                    }
+                    relativePathTag = relativePathTag.withPrefix(maybeChild.get().getPrefix());
+
+                    contents.add(relativePathTag);
+                    return tag.withContent(contents);
                 }
                 return super.visitTag(tag, ctx);
             }
